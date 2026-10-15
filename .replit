@@ -1,0 +1,10 @@
+run = "python conquest_server.py"
+modules = ["python-3.12"]
+
+[deployment]
+run = ["python", "conquest_server.py"]
+deploymentTarget = "vm"
+
+[[ports]]
+localPort = 8080
+externalPort = 80
