@@ -15,6 +15,8 @@ import random
 from http import HTTPStatus
 
 MAX_PLAYERS = 5
+CHARACTERS = ('spongebob', 'jack', 'wick')
+FX_KINDS = ('spray', 'ship', 'shot', 'point', 'med', 'whistle')   # ability visuals we relay
 TARGET_COUNT = 8
 MAX_HP = 100.0
 TARGET_REVIVE_DELAY = 3.0
@@ -28,6 +30,8 @@ class Player:
         self.name = name
         self.conn = conn
         self.hp = MAX_HP
+        self.kind = 'spongebob'       # which character they picked
+        self.extra = {}               # weapon in hand, skeleton form, dog position
         # x, y, z, ry, weapon, punch_t, pitch  (hp is appended when sending)
         self.state = [(pid - 3) * 2.0, 0.0, 0.0, 0.0, 0, -1, 0.0]
 
@@ -98,8 +102,27 @@ class Game:
             try:
                 player.state = [float(m['x']), float(m['y']), float(m['z']), float(m['ry']),
                                 int(m['w']), float(m['pt']), float(m['pp'])]
+                if m.get('k') in CHARACTERS:
+                    player.kind = m['k']
+                extra = {}
+                wp = m.get('wp')
+                if isinstance(wp, str) and len(wp) <= 16:
+                    extra['wp'] = wp
+                if m.get('sk'):
+                    extra['sk'] = 1
+                dg = m.get('dg')
+                if isinstance(dg, list) and len(dg) == 3:
+                    extra['dg'] = [float(dg[0]), float(dg[1]), float(dg[2])]
+                player.extra = extra
             except (KeyError, TypeError, ValueError):
                 pass
+        elif t == 'fx':
+            if m.get('k') in FX_KINDS:
+                out = {'t': 'fx', 'id': player.id, 'k': m['k']}
+                for key in ('p', 'd', 'e', 'v', 'i'):
+                    if key in m:
+                        out[key] = m[key]
+                await self.broadcast(out, exclude=player)
         elif t == 'fire':
             await self.broadcast({'t': 'fire', 'b': m.get('b'), 'p': m.get('p'), 'v': m.get('v')},
                                  exclude=player)
@@ -157,7 +180,7 @@ class Game:
             await asyncio.sleep(SNAP_INTERVAL)
             if self.players:
                 snap = {str(p.id): [round(v, 2) if isinstance(v, float) else v for v in p.state]
-                        + [round(p.hp, 1)] for p in self.players.values()}
+                        + [round(p.hp, 1), p.kind, p.extra] for p in self.players.values()}
                 await self.broadcast({'t': 'snap', 'p': snap})
 
 
