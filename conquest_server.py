@@ -16,7 +16,7 @@ from http import HTTPStatus
 
 MAX_PLAYERS = 5
 CHARACTERS = ('spongebob', 'jack', 'wick', 'spiderman')
-FX_KINDS = ('spray', 'ship', 'shot', 'point', 'med', 'whistle', 'webshot', 'webt')   # ability visuals we relay
+FX_KINDS = ('spray', 'ship', 'shot', 'point', 'med', 'whistle', 'webshot', 'webt', 'wlstart', 'wlgo')   # ability visuals we relay
 TARGET_COUNT = 8
 MAX_HP = 100.0
 TARGET_REVIVE_DELAY = 3.0
@@ -114,6 +114,8 @@ class Game:
                     extra['wp'] = wp
                 if m.get('sk'):
                     extra['sk'] = 1
+                if m.get('wl') in (1, 2, 3):
+                    extra['wl'] = m['wl']
                 dg = m.get('dg')
                 if isinstance(dg, list) and len(dg) == 3:
                     extra['dg'] = [float(dg[0]), float(dg[1]), float(dg[2])]
