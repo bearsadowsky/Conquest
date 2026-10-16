@@ -16,10 +16,13 @@ from http import HTTPStatus
 
 MAX_PLAYERS = 5
 CHARACTERS = ('spongebob', 'jack', 'wick', 'spiderman')
-FX_KINDS = ('spray', 'ship', 'shot', 'point', 'med', 'whistle')   # ability visuals we relay
+FX_KINDS = ('spray', 'ship', 'shot', 'point', 'med', 'whistle', 'webshot', 'webt')   # ability visuals we relay
 TARGET_COUNT = 8
 MAX_HP = 100.0
 TARGET_REVIVE_DELAY = 3.0
+WEB_TIME = 5.0                # Spider-Man's web holds a player this long
+WEB_TICKS = 10
+WEB_DAMAGE_TOTAL = MAX_HP / 3  # electricity: a third of a full health bar over the 5 seconds
 SNAP_INTERVAL = 0.05          # 20 snapshots per second
 MAX_DAMAGE = 500.0            # sanity clamp on a single reported hit
 
@@ -32,6 +35,7 @@ class Player:
         self.hp = MAX_HP
         self.kind = 'spongebob'       # which character they picked
         self.extra = {}               # weapon in hand, skeleton form, dog position
+        self.webbed = False           # stuck in Spider-Man's web
         # x, y, z, ry, weapon, punch_t, pitch  (hp is appended when sending)
         self.state = [(pid - 3) * 2.0, 0.0, 0.0, 0.0, 0, -1, 0.0]
 
@@ -123,6 +127,11 @@ class Game:
                     if key in m:
                         out[key] = m[key]
                 await self.broadcast(out, exclude=player)
+        elif t == 'web':
+            try:
+                await self.web_player(player, int(m.get('id')))
+            except (TypeError, ValueError):
+                pass
         elif t == 'fire':
             await self.broadcast({'t': 'fire', 'b': m.get('b'), 'p': m.get('p'), 'v': m.get('v')},
                                  exclude=player)
@@ -164,15 +173,50 @@ class Game:
         victim = self.players.get(victim_id)
         if victim is None:
             return
-        amount = max(0.0, min(amount, MAX_DAMAGE))
+        await self.damage_player(attacker, victim, max(0.0, min(amount, MAX_DAMAGE)))
+
+    async def damage_player(self, attacker, victim, amount, how='flattened'):
+        """Takes health off a player. Returns True if that killed them (they respawn at full health)."""
         victim.hp -= amount
-        if victim.hp <= 0:
-            victim.hp = MAX_HP
-            if victim is attacker:
-                text = f'{victim.name} blew themselves up!'
-            else:
-                text = f'{attacker.name} flattened {victim.name}!'
-            await self.broadcast({'t': 'died', 'id': victim.id, 'text': text})
+        if victim.hp > 0:
+            return False
+        victim.hp = MAX_HP
+        if victim is attacker:
+            text = f'{victim.name} blew themselves up!'
+        elif how == 'electrified':
+            text = f'{victim.name} was electrified by {attacker.name}!'
+        else:
+            text = f'{attacker.name} flattened {victim.name}!'
+        await self.broadcast({'t': 'died', 'id': victim.id, 'text': text})
+        if victim.webbed:                       # dying frees you from the web
+            victim.webbed = False
+            await self.broadcast({'t': 'unwebbed', 'id': victim.id})
+        return True
+
+    # ---------------------------------------------------------- Spider-Man's web
+    async def web_player(self, attacker, victim_id):
+        victim = self.players.get(victim_id)
+        if victim is None or victim is attacker or victim.webbed:
+            return
+        victim.webbed = True
+        await self.broadcast({'t': 'webbed', 'id': victim.id, 'dur': WEB_TIME})
+        asyncio.ensure_future(self.web_ticks(attacker, victim))
+
+    async def web_ticks(self, attacker, victim):
+        """The web is electrified: a third of a full health bar, spread over the 5 seconds."""
+        try:
+            step = WEB_TIME / WEB_TICKS
+            for _ in range(WEB_TICKS):
+                await asyncio.sleep(step)
+                if not victim.webbed or self.players.get(victim.id) is not victim:
+                    return
+                if await self.damage_player(attacker, victim, WEB_DAMAGE_TOTAL / WEB_TICKS, 'electrified'):
+                    return
+            if victim.webbed:
+                victim.webbed = False
+                await self.broadcast({'t': 'unwebbed', 'id': victim.id})
+        except Exception:
+            victim.webbed = False
 
     # ---------------------------------------------------------- snapshots
     async def snapshot_loop(self):
